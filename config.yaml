@@ -1,0 +1,36 @@
+# ─────────────────────────────────────────────────
+# Binance Market Monitor — Configuration
+# ─────────────────────────────────────────────────
+
+# Symbols to monitor (Binance Futures USDT-M perpetuals)
+symbols:
+  - XLMUSDT
+  - SOLUSDT
+  - BTCUSDT
+  - ETHUSDT
+
+# Timeframes to run on every symbol
+# Valid values: 1m 3m 5m 15m 30m 1h 2h 4h 6h 8h 12h 1d
+timeframes:
+  - 15m
+  - 1h
+
+# How often to poll Binance (minutes)
+poll_interval_minutes: 5
+
+# Cooldown between repeated alerts for the same condition/symbol/timeframe (minutes)
+# Prevents duplicate alerts during choppy/noisy price action
+cooldown_minutes: 30
+
+# ─── Indicator parameters ────────────────────────
+bb_period: 20        # Bollinger Band SMA period
+bb_std: 2.0          # Bollinger Band standard deviation multiplier
+rsi_period: 14       # RSI look-back period
+rsi_overbought: 70.0 # RSI threshold for overbought alert
+rsi_oversold: 30.0   # RSI threshold for oversold alert
+ema_short: 20        # Short EMA period
+ema_long: 50         # Long EMA period
+swing_lookback: 50   # Candles to look back for swing high/low
+
+# ─── Storage ─────────────────────────────────────
+log_dir: logs        # Directory for market_data.csv, monitor.log, cooldowns.json

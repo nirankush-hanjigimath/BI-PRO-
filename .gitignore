@@ -1,0 +1,24 @@
+# Secrets
+.env
+
+# Runtime logs and state (generated at runtime on Railway)
+logs/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+venv/
+.venv/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test artefacts
+cooldowns_dryrun.json
+dry_run_output.txt
+run_dry_run_test.py

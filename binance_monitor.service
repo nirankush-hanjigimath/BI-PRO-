@@ -1,0 +1,27 @@
+[Unit]
+Description=Binance Market Monitor — AI-assisted trade alerts
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# ── Change these paths to match your actual install ──
+User=ubuntu
+WorkingDirectory=/home/ubuntu/binance-monitor
+ExecStart=/home/ubuntu/binance-monitor/venv/bin/python main.py
+
+# Load secrets from a .env file (never hardcode in this file)
+EnvironmentFile=/home/ubuntu/binance-monitor/.env
+
+# Restart policy: restart after 10s on failure, up to 5 times per 60s burst
+Restart=on-failure
+RestartSec=10s
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Redirect stdout/stderr to systemd journal (readable with: journalctl -u binance-monitor -f)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=binance-monitor
+
+[Install]
+WantedBy=multi-user.target
