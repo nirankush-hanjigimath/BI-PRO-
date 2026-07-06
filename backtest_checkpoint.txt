@@ -1,0 +1,10 @@
+BACKTEST CHECKPOINT
+===================
+
+Status at time of termination:
+Current Percentage: 42.5%
+Current Simulation Date: 2024-11-07
+
+Metrics & Trades:
+Total trades simulated so far: N/A (Metrics are compiled at the end of the simulation)
+Any metrics calculated so far: N/A (Sharpe, Profit Factor, and Drawdown are calculated upon 100% completion in report.py)

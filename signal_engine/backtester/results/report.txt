@@ -1,0 +1,65 @@
+================================================================================
+🚀 INSTITUTIONAL CRYPTO SIGNAL ENGINE - BACKTEST REPORT
+⚠️ Futures data and liquidity gate mocked to neutral — live results may differ
+================================================================================
+
+Total Trades Generated: 463
+
+--- OVERALL METRICS ---
+Profit Factor:      0.65
+Sharpe Ratio:       -2.02
+Win Rate:           24.8%
+Max Drawdown:       8.3%
+Average R Multiple: -0.43R
+Expectancy/Trade:   $-0.17
+Max Consec Losses:  17 [MAX_DRAWDOWN_STREAK]
+
+--- MONTHLY RETURNS ---
+2023-08: $  -1.09  🔴 RED
+2023-09: $  -1.88  🔴 RED
+2023-10: $   0.26  🟢 GREEN
+2023-11: $  -0.06  🔴 RED
+2023-12: $  -4.33  🔴 RED
+2024-01: $  -7.94  🔴 RED
+2024-02: $   0.54  🟢 GREEN
+2024-03: $   9.98  🟢 GREEN
+2024-04: $   4.11  🟢 GREEN
+2024-05: $  -2.23  🔴 RED
+2024-06: $  -1.45  🔴 RED
+2024-07: $  -0.19  🔴 RED
+2024-08: $ -10.53  🔴 RED
+2024-09: $  -5.99  🔴 RED
+2024-10: $  -1.09  🔴 RED
+2024-11: $  -8.10  🔴 RED
+2024-12: $  -3.84  🔴 RED
+2025-01: $  -0.16  🔴 RED
+2025-02: $   0.01  🟢 GREEN
+2025-03: $   3.00  🟢 GREEN
+2025-04: $  -6.72  🔴 RED
+2025-05: $ -10.49  🔴 RED
+2025-06: $   0.96  🟢 GREEN
+2025-07: $   2.57  🟢 GREEN
+2025-08: $  -5.54  🔴 RED
+2025-09: $  -0.39  🔴 RED
+2025-10: $  -2.84  🔴 RED
+2025-11: $  -0.31  🔴 RED
+2025-12: $  -7.41  🔴 RED
+2026-01: $   3.39  🟢 GREEN
+2026-02: $  -3.62  🔴 RED
+2026-03: $  -4.48  🔴 RED
+2026-04: $  -7.29  🔴 RED
+2026-05: $  -5.41  🔴 RED
+2026-06: $  -2.39  🔴 RED
+2026-07: $  -0.07  🔴 RED
+
+--- 6-MONTH PERIOD ANALYSIS ---
+Period 0 (2023-08 to 2024-01): Trades=84 | PF=0.59 | Sharpe=-2.68 [WEAK PERIOD]
+Period 1 (2024-02 to 2024-07): Trades=82 | PF=1.30 | Sharpe=1.16
+Period 2 (2024-08 to 2025-01): Trades=90 | PF=0.39 | Sharpe=-4.89 [WEAK PERIOD]
+Period 3 (2025-02 to 2025-07): Trades=67 | PF=0.69 | Sharpe=-1.58 [WEAK PERIOD]
+Period 4 (2025-08 to 2026-01): Trades=58 | PF=0.50 | Sharpe=-3.01 [WEAK PERIOD]
+Period 5 (2026-02 to 2026-07): Trades=82 | PF=0.49 | Sharpe=-3.41 [WEAK PERIOD]
+
+--- CALIBRATION CHECK ---
+SYSTEM NEEDS RECALIBRATION BEFORE GOING LIVE
+================================================================================

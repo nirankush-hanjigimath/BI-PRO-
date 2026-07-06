@@ -87,7 +87,7 @@ def send_discord_alert(symbol: str, direction: str, price: float,
     Returns:
         True on success, False on failure (errors are logged, not raised).
     """
-    url = webhook_url or os.environ.get("DISCORD_WEBHOOK_URL", "")
+    url = webhook_url or os.environ.get("DISCORD_WEBHOOK_SYSTEM", "")
     if not url:
         logger.error(
             "DISCORD_WEBHOOK_URL is not set. Cannot send alert. "
@@ -126,7 +126,7 @@ def send_startup_notification(symbols: list[str], timeframes: list[str],
     Send a brief startup message to Discord so you know the monitor is live.
     Failures are silently logged — startup should not be blocked.
     """
-    url = webhook_url or os.environ.get("DISCORD_WEBHOOK_URL", "")
+    url = webhook_url or os.environ.get("DISCORD_WEBHOOK_SYSTEM", "")
     if not url:
         return
 
