@@ -1,24 +1,13 @@
-# Secrets
 .env
-
-# Runtime logs and state (generated at runtime on Railway)
+paper_state.json
+engine_state.json
+backtest_checkpoint.txt
+backtest_errors.log
 logs/
-
-# Python cache
+signal_engine/backtester/data/
+signal_engine/backtester/results/
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-
-# Virtual environment
 venv/
-.venv/
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Test artefacts
-cooldowns_dryrun.json
-dry_run_output.txt
-run_dry_run_test.py
+scratch_*.py
+test_*.py
