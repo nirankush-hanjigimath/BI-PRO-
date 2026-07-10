@@ -44,7 +44,9 @@ def _post_discord(embed: dict, webhook_url: str = None, content: str = None) -> 
     if content:
         data["content"] = content
     try:
+        slog.info(f"[DEBUG] About to call requests.post to Discord webhook...")
         r = requests.post(url, json=data, timeout=5.0)
+        slog.info(f"[DEBUG] Discord response status: {r.status_code}, body: {r.text}")
         r.raise_for_status()
         slog.info(f"Discord webhook sent successfully to {url[:40]}...")
         return True
@@ -108,6 +110,7 @@ def assemble_and_send_signal(
     Sends to Discord if grade is valid.
     """
     slog = get_logger("STAGE13", symbol)
+    slog.info(f"[DEBUG] Stage 13 assemble_and_send_signal started for {symbol}")
     
     now_utc = datetime.datetime.now(datetime.timezone.utc)
     if symbol in last_signal_time:

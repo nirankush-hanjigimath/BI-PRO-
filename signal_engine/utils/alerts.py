@@ -128,12 +128,14 @@ def _post_embed(
     payload = json.dumps(payload_dict)
 
     try:
+        _log.info(f"[DEBUG] About to call requests.post to Discord webhook for [{alert_type}]...")
         resp = requests.post(
             url,
             data=payload,
             headers={"Content-Type": "application/json"},
             timeout=10,
         )
+        _log.info(f"[DEBUG] Discord response status: {resp.status_code}, body: {resp.text}")
         if resp.status_code in (200, 204):
             _log.info(f"Sent [{alert_type}] '{title}'")
             return True
