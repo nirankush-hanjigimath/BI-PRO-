@@ -32,7 +32,7 @@ from signal_engine.stage12_confidence import analyze_confidence
 from signal_engine.stage13_signal_output import assemble_and_send_signal, send_api_warning
 from signal_engine.stage14_portfolio_risk import check_signal, get_portfolio_status
 from signal_engine.utils.indicators import atr
-from signal_engine.paper_trader import open_paper_position
+from signal_engine.paper_trader import open_paper_position, check_paper_positions, run_daily_summary_check
 from signal_engine.utils.logger import get_logger
 
 logger = get_logger("ENGINE", "SYSTEM")
@@ -211,6 +211,7 @@ def analyze_symbol(sym: str, btc_1h, btc_4h, btc_macro, mode: str) -> dict:
         res['stage07'] = volm
         
         price = float(df_4h["close"].iloc[-1])
+        res['current_price'] = price
         atr_val = float(atr(df_4h, 14).iloc[-1])
         
         # Evaluate both LONG and SHORT
@@ -318,6 +319,11 @@ def run_cycle(symbols: list, mode: str):
     if mode == "dry-run":
         for r in results:
             _print_dry_run_summary(r['symbol'], r)
+            
+    if mode in ("paper", "live"):
+        current_prices = {r['symbol']: r.get('current_price') for r in results if r.get('current_price') is not None}
+        check_paper_positions(current_prices)
+        run_daily_summary_check()
             
     duration = time.time() - start_time
     logger.info(f"=== Cycle {cycle_count} Complete | Duration: {duration:.1f}s | Signals: {signals_fired} ===")
