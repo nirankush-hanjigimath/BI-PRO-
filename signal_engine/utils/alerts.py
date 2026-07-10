@@ -128,7 +128,7 @@ def _post_embed(
     payload = json.dumps(payload_dict)
 
     try:
-        _log.info(f"[DEBUG] About to call requests.post to Discord webhook for [{alert_type}]...")
+        _log.info(f"[DEBUG] About to call requests.post to Discord webhook {url[:40]}... for [{alert_type}]")
         resp = requests.post(
             url,
             data=payload,
@@ -147,13 +147,15 @@ def _post_embed(
         return False
 
     except requests.exceptions.Timeout:
-        _log.error(f"Discord webhook timed out (10 s) for [{alert_type}] '{title}' — continuing")
+        _log.error(f"Discord webhook timed out (10 s) for [{alert_type}] '{title}' to {url[:40]}... — continuing")
         return False
     except requests.exceptions.ConnectionError as exc:
-        _log.error(f"Discord connection error for [{alert_type}] '{title}': {exc} — continuing")
+        _log.error(f"Discord connection error for [{alert_type}] '{title}' to {url[:40]}...: {exc} — continuing")
         return False
     except Exception as exc:  # pylint: disable=broad-except
-        _log.error(f"Unexpected error sending Discord alert [{alert_type}] '{title}': {exc} — continuing")
+        import traceback
+        _log.error(f"Unexpected error sending Discord alert [{alert_type}] '{title}' to {url[:40]}...: {exc} — continuing")
+        _log.error(traceback.format_exc())
         return False
 
 

@@ -353,7 +353,21 @@ def main():
         sys.exit(0)
         
     # Startup Checks
-    if not os.getenv("DISCORD_WEBHOOK_SYSTEM") and args.mode != "dry-run":
+    webhook_sys = os.getenv("DISCORD_WEBHOOK_SYSTEM")
+    if webhook_sys:
+        print(f"[DEBUG] DISCORD_WEBHOOK_SYSTEM loaded. Length: {len(webhook_sys)}. Starts with: {webhook_sys[:40]}...")
+        if args.mode != "dry-run":
+            print(f"[DEBUG] Attempting to send startup test message to {webhook_sys[:40]}...")
+            try:
+                import requests
+                r = requests.post(webhook_sys, json={"content": "🚀 Railway startup test"}, timeout=10.0)
+                print(f"[DEBUG] Startup test response: {r.status_code} - {r.text}")
+                r.raise_for_status()
+            except Exception as e:
+                import traceback
+                print(f"[DEBUG] Startup test FAILED: {e}")
+                traceback.print_exc()
+    elif args.mode != "dry-run":
         print("[FAIL] DISCORD_WEBHOOK_SYSTEM missing in .env")
         sys.exit(1)
         

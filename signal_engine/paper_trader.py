@@ -310,12 +310,17 @@ def send_daily_summary() -> None:
     }
     
     try:
-        requests.post(webhook_url, json={"embeds": [embed]}, timeout=5)
+        logger.info(f"[DEBUG] Sending daily summary to {webhook_url[:40]}...")
+        r = requests.post(webhook_url, json={"embeds": [embed]}, timeout=5)
+        logger.info(f"[DEBUG] Daily summary response: {r.status_code} - {r.text}")
+        r.raise_for_status()
         state["last_summary_date"] = now_date
         _save_state(state)
         logger.info("[PAPER] Daily summary sent to Discord.")
     except Exception as e:
-        logger.error(f"[PAPER] Failed to send Discord summary: {e}")
+        import traceback
+        logger.error(f"[PAPER] Failed to send Discord summary to {webhook_url[:40]}...: {e}")
+        logger.error(traceback.format_exc())
 
 
 def run_daily_summary_check():

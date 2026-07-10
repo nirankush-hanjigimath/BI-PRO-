@@ -44,14 +44,16 @@ def _post_discord(embed: dict, webhook_url: str = None, content: str = None) -> 
     if content:
         data["content"] = content
     try:
-        slog.info(f"[DEBUG] About to call requests.post to Discord webhook...")
+        slog.info(f"[DEBUG] About to call requests.post to Discord webhook {url[:40]}...")
         r = requests.post(url, json=data, timeout=5.0)
         slog.info(f"[DEBUG] Discord response status: {r.status_code}, body: {r.text}")
         r.raise_for_status()
         slog.info(f"Discord webhook sent successfully to {url[:40]}...")
         return True
     except Exception as e:
+        import traceback
         slog.error(f"Discord webhook failed to post to {url[:40]}...: {e}")
+        slog.error(traceback.format_exc())
         return False
 
 def _generate_risks(tags: list, btc_state: str, matrix_stale: bool, stop_pct: float) -> str:
