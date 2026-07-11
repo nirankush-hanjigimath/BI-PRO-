@@ -324,13 +324,21 @@ def send_daily_summary() -> None:
 
 
 def run_daily_summary_check():
-    """To be called in the main loop every 15m. Fires at 23:50 UTC."""
+    from datetime import timedelta
     from signal_engine.utils.logger import get_logger
     get_logger("PAPER", "SUMMARY").info("[DEBUG] run_daily_summary_check() called")
-    now = datetime.now(timezone.utc)
-    # Check if we are in the 23:50 - 23:59 window
-    if now.hour == 23 and now.minute >= 50:
+    
+    state = _load_state()
+    today_ist = (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime('%Y-%m-%d')
+    last_summary = state.get('last_summary_date', '')
+
+    ist_now = datetime.utcnow() + timedelta(hours=5, minutes=30)
+    ist_hour = ist_now.hour
+
+    if last_summary != today_ist and ist_hour >= 21:
         send_daily_summary()
+        state['last_summary_date'] = today_ist
+        _save_state(state)
 
 
 # ── Standalone Test ────────────────────────────────────────────────────────

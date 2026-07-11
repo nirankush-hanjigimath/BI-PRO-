@@ -39,6 +39,24 @@ from signal_engine.utils.logger import get_logger
 logger = get_logger("ENGINE", "SYSTEM")
 cycle_count = 0
 
+status_tracker = {
+    'cycle_count': 0,
+    'signals_a_plus': 0,
+    'signals_a': 0,
+    'signals_b': 0,
+    'signals_c_plus': 0,
+    'closest_signal_symbol': "None",
+    'closest_signal_score': 0.0,
+    'closest_signal_reject': "N/A",
+    'coins_passing_liquidity': 0,
+    'btc_price': 0.0,
+    'btc_trend': "UNKNOWN",
+    'btc_regime': "UNKNOWN",
+    'is_squeezing': False,
+    'btc_resistance': 0.0,
+    'btc_support': 0.0
+}
+
 
 def _send_diagnostic_embed(results: list):
     webhook = os.getenv("DISCORD_WEBHOOK_SYSTEM")
@@ -133,7 +151,126 @@ def _send_diagnostic_embed(results: list):
         print(f"[FAIL] Error sending diagnostic embed: {e}")
 
 
-def _send_market_squeeze_alert(count: int):
+def send_startup_pings():
+    now_utc = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    webhook_a_plus = os.getenv("DISCORD_WEBHOOK_A_PLUS")
+    webhook_a = os.getenv("DISCORD_WEBHOOK_A")
+    webhook_b = os.getenv("DISCORD_WEBHOOK_B")
+    webhook_c = os.getenv("DISCORD_WEBHOOK_C")
+    webhook_sys = os.getenv("DISCORD_WEBHOOK_SYSTEM")
+    
+    embeds = [
+        (webhook_a_plus, "✅ A+ Signal Channel — Online", 0xFFD700, "This channel receives only the highest conviction signals (90-100 confidence). Ping: @here on every signal."),
+        (webhook_a, "✅ A Signal Channel — Online", 0x00ff88, "This channel receives Grade A signals (80-89 confidence). Ping: @here on every signal."),
+        (webhook_b, "✅ B Signal Channel — Online", 0x00cc66, "This channel receives Grade B signals (72-79 confidence). Ping: @here on every signal."),
+        (webhook_c, "✅ C+ Signal Channel — Online", 0xFFD700, "This channel receives lower volume day setups (65-71 confidence). No ping — silent delivery."),
+        (webhook_sys, "✅ System Alerts — Online", 0x3498db, "This channel receives squeeze alerts, 2-hour status updates, daily summaries, paper fills, API warnings, and loss limit alerts.")
+    ]
+    
+    for url, title, color, desc in embeds:
+        if url:
+            payload = {
+                "embeds": [{
+                    "title": title,
+                    "color": color,
+                    "description": desc,
+                    "footer": {"text": f"Signal Engine started at {now_utc}"}
+                }]
+            }
+            try:
+                requests.post(url, json=payload, timeout=5)
+            except Exception as e:
+                logger.error(f"Startup ping failed for {title}: {e}")
+
+def send_2hr_status_update(force=False):
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    now_ist = now_utc + datetime.timedelta(hours=5, minutes=30)
+    
+    if not force and (now_ist.hour >= 23 or now_ist.hour < 7):
+        logger.info("2-Hour Status Update paused (Night hours IST).")
+        for k in ['cycle_count', 'signals_a_plus', 'signals_a', 'signals_b', 'signals_c_plus', 'coins_passing_liquidity']:
+            status_tracker[k] = 0
+        status_tracker['closest_signal_symbol'] = "None"
+        status_tracker['closest_signal_score'] = 0.0
+        status_tracker['closest_signal_reject'] = "N/A"
+        return
+
+    end_utc_str = now_utc.strftime("%H:%M UTC")
+    end_ist_str = now_ist.strftime("%H:%M IST")
+    
+    start_utc_str = (now_utc - datetime.timedelta(hours=2)).strftime("%H:%M UTC")
+    start_ist_str = (now_ist - datetime.timedelta(hours=2)).strftime("%H:%M IST")
+    
+    port = get_portfolio_status()
+    open_pos_count = len(port.get("open_positions", []))
+    
+    from signal_engine.paper_trader import _load_state
+    p_state = _load_state()
+    bal = p_state.get("balance", 1000.0)
+    pct_from_start = ((bal - 1000.0) / 1000.0) * 100.0
+    
+    total_signals = status_tracker['signals_a_plus'] + status_tracker['signals_a'] + status_tracker['signals_b'] + status_tracker['signals_c_plus']
+    
+    if status_tracker['closest_signal_symbol'] == "None" and status_tracker['coins_passing_liquidity'] == 0:
+        closest_str = "No coins reached analysis stage"
+    else:
+        closest_str = f"{status_tracker['closest_signal_symbol']} scored {status_tracker['closest_signal_score']:.1f}/100 — rejected: {status_tracker['closest_signal_reject']}"
+        
+    status_msg = "ACTIVE — signals flowing normally"
+    if status_tracker.get('is_squeezing', False):
+        status_msg = f"SQUEEZE MODE — waiting for BTC to break ${status_tracker.get('btc_resistance', 0):,.2f} or ${status_tracker.get('btc_support', 0):,.2f}"
+
+    embed = {
+        "title": "📊 2-Hour Status Update",
+        "color": 0x3498db,
+        "fields": [
+            {
+                "name": "Field 1 — Period",
+                "value": f"{start_utc_str} → {end_utc_str}\n({start_ist_str} → {end_ist_str})",
+                "inline": False
+            },
+            {
+                "name": "Field 2 — Cycles & Signals",
+                "value": f"Cycles run: {status_tracker['cycle_count']}\nSignals fired: {total_signals} (A+: {status_tracker['signals_a_plus']} | A: {status_tracker['signals_a']} | B: {status_tracker['signals_b']} | C+: {status_tracker['signals_c_plus']})",
+                "inline": False
+            },
+            {
+                "name": "Field 3 — Market Status",
+                "value": f"BTC: ${status_tracker.get('btc_price', 0):,.2f} | {status_tracker.get('btc_trend', 'UNKNOWN')}\nRegime: {status_tracker.get('btc_regime', 'UNKNOWN')}\nCoins passing liquidity: {status_tracker['coins_passing_liquidity']}/7",
+                "inline": False
+            },
+            {
+                "name": "Field 4 — Closest To Signal",
+                "value": closest_str,
+                "inline": False
+            },
+            {
+                "name": "Field 5 — Paper Portfolio",
+                "value": f"Open positions: {open_pos_count}\nVirtual balance: ${bal:,.2f} ({pct_from_start:+.2f}% from start)",
+                "inline": False
+            },
+            {
+                "name": "Field 6 — Status",
+                "value": status_msg,
+                "inline": False
+            }
+        ]
+    }
+    
+    webhook_sys = os.getenv("DISCORD_WEBHOOK_SYSTEM")
+    if webhook_sys:
+        try:
+            requests.post(webhook_sys, json={"embeds": [embed]}, timeout=5)
+        except Exception as e:
+            logger.error(f"Failed to send 2hr status update: {e}")
+            
+    for k in ['cycle_count', 'signals_a_plus', 'signals_a', 'signals_b', 'signals_c_plus', 'coins_passing_liquidity']:
+        status_tracker[k] = 0
+    status_tracker['closest_signal_symbol'] = "None"
+    status_tracker['closest_signal_score'] = 0.0
+    status_tracker['closest_signal_reject'] = "N/A"
+
+def _send_market_squeeze_alert(count: int, btc_squeezing: bool, btc_price: float, btc_resistance: float, btc_support: float):
     import json, os, datetime
     state_file = cfg.state_file
     state = {}
@@ -146,25 +283,29 @@ def _send_market_squeeze_alert(count: int):
     if last_alert:
         last_dt = datetime.datetime.fromisoformat(last_alert)
         if (now - last_dt).total_seconds() < 86400:
-            return # Sent in last 24h
+            return
             
     webhook = os.getenv("DISCORD_WEBHOOK_SYSTEM")
     if not webhook:
         return
         
-    last_sent_str = last_alert or "Never"
-    
-    payload = {
-        "content": f"🌀 **MARKET SQUEEZE DETECTED**\n"
-                   f"{count}/7 coins in LOW_VOL_SQUEEZE\n"
-                   f"No signals expected until breakout.\n"
-                   f"Watch BTC: Break above resistance = bullish signals incoming\n"
-                   f"           Break below support = short signals incoming\n"
-                   f"Last sent: {last_sent_str}"
+    embed = {
+        "title": "🌀 MARKET SQUEEZE DETECTED",
+        "color": 0xFF8C00,
+        "description": "No signals expected until breakout. Volume spike + price break = signals incoming.",
+        "fields": [
+            {"name": "Coins in Squeeze", "value": f"{count}/7", "inline": True},
+            {"name": "BTC Squeezing?", "value": "🚨 YES" if btc_squeezing else "NO", "inline": True},
+            {"name": "BTC Current Price", "value": f"${btc_price:,.2f}", "inline": False},
+            {"name": "Nearest Resistance (Breakout Long)", "value": f"${btc_resistance:,.2f}", "inline": True},
+            {"name": "Nearest Support (Breakdown Short)", "value": f"${btc_support:,.2f}", "inline": True},
+        ],
+        "footer": {"text": "Engine automatically limits risk during contraction."}
     }
+    
     try:
         import requests
-        requests.post(webhook, json=payload, timeout=5)
+        requests.post(webhook, json={"embeds": [embed]}, timeout=5)
         state['last_squeeze_alert'] = now.isoformat()
         with open(state_file, 'w') as f:
             json.dump(state, f)
@@ -311,6 +452,10 @@ def analyze_symbol(sym: str, btc_1h, btc_4h, btc_macro, mode: str) -> dict:
         if df_15m is None or df_1h is None or df_4h is None:
             return res
             
+        # Stage 03
+        reg = analyze_regime(df_1h, df_4h, sym)
+        res['stage03'] = reg
+        
         # Stage 01
         liq = check_liquidity(sym)
         res['stage01'] = liq
@@ -321,6 +466,8 @@ def analyze_symbol(sym: str, btc_1h, btc_4h, btc_macro, mode: str) -> dict:
             elif 'diagnostic_reject' not in res:
                 res['diagnostic_reject'] = f"LIQUIDITY ({liq.reject_reason})"
             
+        status_tracker['coins_passing_liquidity'] += 1
+            
         # Stage 02
         tf = check_time_filter(df_1h)
         res['stage02'] = tf
@@ -330,10 +477,6 @@ def analyze_symbol(sym: str, btc_1h, btc_4h, btc_macro, mode: str) -> dict:
                 return res
             elif 'diagnostic_reject' not in res:
                 res['diagnostic_reject'] = "TIME_FILTER"
-            
-        # Stage 03
-        reg = analyze_regime(df_1h, df_4h, sym)
-        res['stage03'] = reg
         
         # Stage 04 - passed in
         res['stage04'] = btc_macro
@@ -368,6 +511,11 @@ def analyze_symbol(sym: str, btc_1h, btc_4h, btc_macro, mode: str) -> dict:
         res['direction'] = best_dir
         
         conf = res['stage12']
+        if conf.final_score > status_tracker['closest_signal_score'] and conf.grade == "REJECT":
+            status_tracker['closest_signal_score'] = conf.final_score
+            status_tracker['closest_signal_symbol'] = sym
+            status_tracker['closest_signal_reject'] = "CONFIDENCE_SCORE"
+            
         if conf.grade == "REJECT":
             if mode != "diagnostic":
                 res['decision'] = "REJECTED_CONFIDENCE"
@@ -381,6 +529,10 @@ def analyze_symbol(sym: str, btc_1h, btc_4h, btc_macro, mode: str) -> dict:
         res['stage14'] = port
         
         if not port.approved:
+            if conf.final_score > status_tracker['closest_signal_score']:
+                status_tracker['closest_signal_score'] = conf.final_score
+                status_tracker['closest_signal_symbol'] = sym
+                status_tracker['closest_signal_reject'] = f"PORTFOLIO ({port.reject_reason})"
             if mode != "diagnostic":
                 res['decision'] = f"REJECTED_PORTFOLIO ({port.reject_reason})"
                 return res
@@ -388,6 +540,11 @@ def analyze_symbol(sym: str, btc_1h, btc_4h, btc_macro, mode: str) -> dict:
                 res['diagnostic_reject'] = f"PORTFOLIO ({port.reject_reason})"
             
         res['decision'] = "SIGNAL_APPROVED"
+        
+        if conf.grade == 'A+': status_tracker['signals_a_plus'] += 1
+        elif conf.grade == 'A': status_tracker['signals_a'] += 1
+        elif conf.grade == 'B': status_tracker['signals_b'] += 1
+        elif conf.grade == 'C+': status_tracker['signals_c_plus'] += 1
         
         # Stage 13 (Send if not dry-run or diagnostic)
         if mode not in ("dry-run", "diagnostic"):
@@ -440,8 +597,13 @@ def analyze_symbol(sym: str, btc_1h, btc_4h, btc_macro, mode: str) -> dict:
 
 
 def run_cycle(symbols: list, mode: str):
+    from signal_engine.stage14_portfolio_risk import force_periodic_resets
+    force_periodic_resets()
+    
     global cycle_count
     cycle_count += 1
+    status_tracker['cycle_count'] += 1
+    
     start_time = time.time()
     logger.info(f"=== Starting Cycle {cycle_count} ({mode}) ===")
     
@@ -456,6 +618,10 @@ def run_cycle(symbols: list, mode: str):
         return
         
     btc_macro = analyze_btc_macro(btc_1h, btc_4h)
+    
+    # Store BTC stats for 2hr update
+    status_tracker['btc_price'] = float(btc_4h["close"].iloc[-1])
+    status_tracker['btc_trend'] = btc_macro.classification
     
     results = Parallel(n_jobs=2, prefer="threads")(
         delayed(analyze_symbol)(sym, btc_1h, btc_4h, btc_macro, mode) for sym in symbols
@@ -477,13 +643,32 @@ def run_cycle(symbols: list, mode: str):
             
     # --- Market Squeeze Check ---
     squeezed_count = 0
+    btc_squeezing = False
+    
     for r in results:
         reg = r.get('stage03')
-        if reg and reg['regime_1h'].regime == "LOW_VOL_SQUEEZE" and reg['regime_4h'].regime == "LOW_VOL_SQUEEZE":
-            squeezed_count += 1
-            
-    if squeezed_count >= 4 and mode != "dry-run":
-        _send_market_squeeze_alert(squeezed_count)
+        sym = r.get('symbol')
+        if reg:
+            if reg['regime_1h'].regime == "LOW_VOL_SQUEEZE" or reg['regime_4h'].regime == "LOW_VOL_SQUEEZE":
+                squeezed_count += 1
+            if sym == "BTCUSDT":
+                status_tracker['btc_regime'] = reg['regime_1h'].regime
+                if reg['regime_1h'].regime == "LOW_VOL_SQUEEZE":
+                    btc_squeezing = True
+
+    status_tracker['is_squeezing'] = (squeezed_count >= 3 or btc_squeezing)
+    if status_tracker['is_squeezing']:
+        # Fetch S/R for BTC
+        btc_price = status_tracker['btc_price']
+        from signal_engine.stage10_support_resistance import analyze_sr
+        btc_sr = analyze_sr(btc_4h, "BTCUSDT", "LONG", btc_price, btc_price*1.05, btc_price*0.95)
+        btc_res = btc_sr.nearest_resistance if btc_sr.nearest_resistance else btc_price
+        btc_sup = btc_sr.nearest_support if btc_sr.nearest_support else btc_price
+        status_tracker['btc_resistance'] = btc_res
+        status_tracker['btc_support'] = btc_sup
+        
+        if mode != "dry-run":
+            _send_market_squeeze_alert(squeezed_count, btc_squeezing, btc_price, btc_res, btc_sup)
             
     duration = time.time() - start_time
     logger.info(f"=== Cycle {cycle_count} Complete | Duration: {duration:.1f}s | Signals: {signals_fired} ===")
@@ -546,14 +731,22 @@ def main():
     if args.force_live:
         print("\n⚠️ WARNING: FORCING LIVE MODE WITHOUT 14-DAY GATE ⚠️\n")
         
+    if args.mode not in ("dry-run", "diagnostic"):
+        send_startup_pings()
+        
     # Initial run
     run_cycle(symbols, args.mode)
+    
+    if args.mode not in ("dry-run", "diagnostic"):
+        send_2hr_status_update(force=True)
     
     if args.mode == "diagnostic":
         sys.exit(0)
     
     # Schedule
     schedule.every(15).minutes.do(run_cycle, symbols=symbols, mode=args.mode)
+    if args.mode not in ("dry-run", "diagnostic"):
+        schedule.every(2).hours.do(send_2hr_status_update)
     
     print("\n[Scheduler Active] Running every 15 minutes. Press Ctrl+C to exit.\n")
     try:

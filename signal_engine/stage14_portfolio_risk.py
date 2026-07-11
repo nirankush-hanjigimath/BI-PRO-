@@ -240,6 +240,13 @@ def manual_reset_weekly() -> None:
     slog.info("Manual reset executed. PnL tracking cleared and halts lifted.")
 
 
+def force_periodic_resets() -> None:
+    """Forces the daily/weekly reset check directly, bypassing signal generation."""
+    state = _load_state()
+    _ensure_initialized(state)
+    _save_state(state)
+
+
 # ── Standalone Test ────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
