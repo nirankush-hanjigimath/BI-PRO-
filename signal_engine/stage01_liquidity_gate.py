@@ -15,7 +15,7 @@ from typing import Optional
 import requests
 
 from signal_engine.config import cfg
-from signal_engine.stage00_data_fetcher import get_volume_p40, _refresh_daily_volume_cache
+from signal_engine.stage00_data_fetcher import get_volume_p40, get_volume_p20, _refresh_daily_volume_cache
 from signal_engine.utils.logger import get_logger
 
 _SPOT_BASE = "https://api.binance.com"
@@ -32,6 +32,7 @@ class LiquidityResult:
     current_volume_usd:  Optional[float]  # 24h quote volume in USD
     p40_threshold_usd:   Optional[float]  # P40 of 30-day daily volume
     current_spread_pct:  Optional[float]  # bid/ask spread %
+    liquidity_tier:      str              # "P40", "P20_ONLY", or "FAILED"
     reject_reason:       Optional[str]    # None if passed
 
 
@@ -39,14 +40,15 @@ class LiquidityResult:
 
 def _check_volume(symbol: str) -> tuple:
     """
-    Returns (pass: bool, current_vol: float|None, p40: float|None, reason: str|None)
+    Returns (pass: bool, current_vol: float|None, p40: float|None, tier: str, reason: str|None)
     """
     slog = get_logger("STAGE01", symbol)
 
     p40 = get_volume_p40(symbol)
-    if p40 is None:
-        slog.warning("P40 threshold unavailable — volume gate SKIPPED (treating as PASS)")
-        return (True, None, None, None)
+    p20 = get_volume_p20(symbol)
+    if p40 is None or p20 is None:
+        slog.warning("P40/P20 threshold unavailable — volume gate SKIPPED (treating as PASS)")
+        return (True, None, None, "P40", None)
 
     try:
         resp = requests.get(
@@ -60,21 +62,28 @@ def _check_volume(symbol: str) -> tuple:
 
     except Exception as exc:
         slog.error(f"24h ticker fetch failed: {exc} — volume gate API_ERROR")
-        return (False, None, p40, f"API_ERROR — 24h ticker: {exc}")
+        return (False, None, p40, "FAILED", f"API_ERROR — 24h ticker: {exc}")
 
-    passed = current_vol >= p40
-    if passed:
-        slog.info(
-            f"Volume PASS  ${current_vol/1e6:,.1f}M >= P40 ${p40/1e6:,.1f}M"
-        )
+    if current_vol >= p40:
+        tier = "P40"
+        passed = True
+        slog.info(f"Volume PASS  ${current_vol/1e6:,.1f}M >= P40 ${p40/1e6:,.1f}M")
+        reason = None
+    elif current_vol >= p20:
+        tier = "P20_ONLY"
+        passed = True
+        slog.info(f"Volume P20_ONLY  ${current_vol/1e6:,.1f}M >= P20 ${p20/1e6:,.1f}M (but < P40)")
+        reason = None
     else:
+        tier = "FAILED"
+        passed = False
         reason = (
             f"LIQUIDITY_GATE_VOLUME — current 24h volume "
-            f"${current_vol/1e6:,.1f}M below P40 threshold ${p40/1e6:,.1f}M"
+            f"${current_vol/1e6:,.1f}M below P20 threshold ${p20/1e6:,.1f}M"
         )
         slog.warning(f"Volume FAIL  {reason}")
 
-    return (passed, current_vol, p40, None if passed else reason)
+    return (passed, current_vol, p40, tier, reason)
 
 
 # ── Spread gate ────────────────────────────────────────────────────────────
@@ -131,14 +140,14 @@ def check_liquidity(symbol: str) -> LiquidityResult:
     slog = get_logger("STAGE01", symbol)
     slog.info("Running liquidity gate...")
 
-    vol_pass,  current_vol, p40,       vol_reason  = _check_volume(symbol)
+    vol_pass, current_vol, p40, tier, vol_reason = _check_volume(symbol)
     sprd_pass, spread_pct,  sprd_reason             = _check_spread(symbol)
 
     overall = vol_pass and sprd_pass
     reason  = vol_reason or sprd_reason   # first failure wins
 
     if overall:
-        slog.info("Liquidity gate PASSED — symbol cleared for analysis")
+        slog.info(f"Liquidity gate PASSED ({tier}) — symbol cleared for analysis")
     else:
         slog.warning(f"Liquidity gate REJECTED — {reason}")
 
@@ -150,6 +159,7 @@ def check_liquidity(symbol: str) -> LiquidityResult:
         current_volume_usd = current_vol,
         p40_threshold_usd  = p40,
         current_spread_pct = spread_pct,
+        liquidity_tier     = tier if overall else "FAILED",
         reject_reason      = reason,
     )
 

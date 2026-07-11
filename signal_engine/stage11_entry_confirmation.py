@@ -37,6 +37,9 @@ class EntrySignalResult:
             candle_status      = candle_status,
             is_valid           = self.is_confirmed,
             rejection_reason   = self.reject_reason,
+            is_doji            = self.is_doji,
+            is_spinning_top    = self.is_spinning_top,
+            body_quality       = self.body_quality,
         )
 
 

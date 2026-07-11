@@ -56,6 +56,7 @@ def analyze_confidence(
     futures: FuturesData,
     sr_levels: SRLevels,
     entry: EntrySignal,
+    liquidity_tier: str,
 ) -> ConfidenceScore:
     slog = get_logger("STAGE12", symbol)
     slog.info(f"Calculating final confidence score for {direction}...")
@@ -265,6 +266,10 @@ def analyze_confidence(
     modifiers = []
     mod_total = 0
     
+    if liquidity_tier == "P20_ONLY":
+        modifiers.append(ModifierInfo("RELAXED_LIQUIDITY", -8))
+        mod_total -= 8
+    
     if r_state.regime_age_candles > 48:
         modifiers.append(ModifierInfo("Regime age > 48 candles", -10))
         mod_total -= 10
@@ -373,7 +378,7 @@ if __name__ == "__main__":
     
     score_max = analyze_confidence(
         "BTCUSDT", "LONG", time_filter_max, regime_max, btc_max, rs_max, trend_max,
-        vol_max, volatility_max, futures_max, sr_max, entry_max
+        vol_max, volatility_max, futures_max, sr_max, entry_max, "P40"
     )
     
     for k, v in score_max.layer_scores.items():
@@ -386,7 +391,7 @@ if __name__ == "__main__":
     sr_reject = SRLevels([], [], None, None, 0.5, 0.5, True, False, "Nearest resistance < 0.8%")
     score_rej = analyze_confidence(
         "BTCUSDT", "LONG", time_filter_max, regime_max, btc_max, rs_max, trend_max,
-        vol_max, volatility_max, futures_max, sr_reject, entry_max
+        vol_max, volatility_max, futures_max, sr_reject, entry_max, "P40"
     )
     print(f"  FINAL SCORE: {score_rej.final_score} | GRADE: {score_rej.grade}")
     print(f"  REJECT REASON: {score_rej.reject_reason}")
@@ -431,7 +436,7 @@ if __name__ == "__main__":
         ent = analyze_entry_confirmation(df_15m, sym, "LONG", reg["regime_1h"].regime, sr_res.resistance_levels, sr_res.support_levels)
         
         score_live = analyze_confidence(
-            sym, "LONG", tf, reg, btc_m, rs, tq, vol, vty, fut, sr_res.to_sr_levels(), ent.to_entry_signal("CLOSED")
+            sym, "LONG", tf, reg, btc_m, rs, tq, vol, vty, fut, sr_res.to_sr_levels(), ent.to_entry_signal("CLOSED"), "P40"
         )
         
         for k, v in score_live.layer_scores.items():

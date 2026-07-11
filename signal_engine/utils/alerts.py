@@ -58,8 +58,6 @@ def get_webhook_for_grade(grade):
         return cfg.discord_webhook_a
     elif grade == 'B':
         return cfg.discord_webhook_b
-    elif grade == 'C':
-        return cfg.discord_webhook_c if cfg.send_grade_c else None
     else:
         return None
 

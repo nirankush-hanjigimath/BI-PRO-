@@ -97,6 +97,51 @@ def _extract_tags(futures: FuturesData, trend_tag: str, vol_tag: str, vol_env: b
     return t
 
 
+def is_grade_c_plus(
+    signal_data: dict, 
+    conf: ConfidenceScore, 
+    entry: EntrySignal, 
+    regime_1h: RegimeState, 
+    regime_4h: RegimeState, 
+    trend, 
+    volm, 
+    liquidity_tier: str,
+    sr_levels: SRLevels
+) -> bool:
+    if not (65 <= conf.final_score < 72):
+        return False
+    if liquidity_tier not in ("P40", "P20_ONLY"):
+        return False
+    if entry.pattern_name in (None, "NONE"):
+        return False
+    if entry.is_spinning_top:
+        return False
+    if entry.is_doji:
+        return False
+    if entry.body_quality != "STRONG":
+        return False
+    if signal_data["btc_trend"] == "STRONGLY_BEARISH":
+        return False
+        
+    if signal_data["direction"] == "LONG" and sr_levels.long_rejected:
+        return False
+    if signal_data["direction"] == "SHORT" and sr_levels.short_rejected:
+        return False
+        
+    if trend.trend_quality == "NO_TREND":
+        return False
+    if regime_1h.regime == "LOW_VOL_SQUEEZE" and regime_4h.regime == "LOW_VOL_SQUEEZE":
+        return False
+    if "4H_TREND_OPPOSITION" in [m.name for m in conf.modifiers]:
+        return False
+    if volm.volume_z_score < -0.5:
+        return False
+    if trend.direction == "NO_TREND":
+        return False
+        
+    return True
+
+
 def assemble_and_send_signal(
     symbol: str, direction: str,
     regime: RegimeState, btc_macro: BTCMacro, rs: RelativeStrength,
@@ -106,6 +151,7 @@ def assemble_and_send_signal(
     rr_ratio: float, position_size_pct: float, invalidation_price: float,
     trend_tag: str, vol_tag: str, vol_env: bool, matrix_stale: bool,
     volume_z: float, ema_price: float,
+    liquidity_tier: str, trend_result, vol_result, regime_4h: RegimeState
 ) -> Signal:
     """
     Assembles the final Signal dataclass, generating narratives and formatting the embed.
@@ -209,16 +255,51 @@ def assemble_and_send_signal(
     from signal_engine.utils.alerts import get_webhook_for_grade
     webhook_url = get_webhook_for_grade(confidence.grade)
     
-    if not webhook_url:
-        slog.info(f"No webhook configured for grade {confidence.grade}, or sending disabled.")
-        return sig_obj
-        
+    c_plus = False
+    if conf.grade == "REJECT" or conf.grade == "C":
+        c_plus = is_grade_c_plus(signal_data, conf, entry, regime, regime_4h, trend_result, vol_result, liquidity_tier, sr)
+        if c_plus:
+            slog.info("Signal qualifies for Grade C+")
+            conf.grade = "C+"
+        else:
+            slog.info("No webhook configured for grade C, or sending disabled, and C+ conditions failed.")
+            return sig_obj
+            
     content_str = None
-    if confidence.grade == 'A+':
+    if conf.grade == 'A+':
         content_str = "@everyone"
-    elif confidence.grade == 'A':
+    elif conf.grade == 'A':
+        content_str = "@here"
+    elif conf.grade == 'B':
         content_str = "@here"
         
+    if c_plus:
+        c_plus_embed = {
+            "title": f"⚠️ {symbol} · {direction} · Grade C+ · {ts_str}",
+            "color": 0xFFD700,
+            "fields": [
+                {"name": "⚠️ Lower Conviction Setup", "value": "volume slightly below normal threshold. Treat as a watchlist signal, not a high conviction entry.", "inline": False},
+                {"name": "Confidence", "value": f"{conf.final_score}/100 · Grade: C+", "inline": True},
+                {"name": "Market Regime", "value": f"{regime.regime} ({regime.timeframe}) — active {regime.regime_age_candles} candles", "inline": True},
+                {"name": "BTC Trend", "value": f"{btc_macro.classification} ({btc_macro.confidence_modifier:+d})", "inline": True},
+                {"name": "Relative Strength", "value": f"{rs.classification} ({rs.rs_pct:+.2f}% vs BTC)", "inline": True},
+                {"name": "WHY THIS TRADE EXISTS", "value": narrative_text, "inline": False},
+                {"name": "LAYER BREAKDOWN", "value": breakdown, "inline": False},
+                {"name": "Entry", "value": f"${entry_price:,.4f}" if entry_price is not None else "N/A", "inline": True},
+                {"name": "Stop Loss", "value": f"${stop_loss:,.4f} (Swing)" if stop_loss is not None else "N/A", "inline": True},
+                {"name": "Target 1 (1R)", "value": f"${target1:,.4f} ← close 50% here" if target1 is not None else "N/A", "inline": True},
+                {"name": "Target 2 (2R)", "value": f"${target2:,.4f} ← trail stop after" if target2 is not None else "N/A", "inline": True},
+                {"name": "R:R Ratio", "value": f"{rr_ratio:.2f}:1" if rr_ratio is not None else "N/A", "inline": True},
+                {"name": "Position Size", "value": f"{(position_size_pct * 0.25):.2f}% of account (25% risk limit)", "inline": True},
+                {"name": "Invalidation", "value": f"${invalidation_price:,.4f} — if breached thesis is wrong" if invalidation_price is not None else "N/A", "inline": False},
+                {"name": "RISKS", "value": risks_text + "\n• Lower than normal volume — confirm with price action before entering", "inline": False},
+            ]
+        }
+        webhook_url = os.getenv("DISCORD_WEBHOOK_C")
+        if webhook_url:
+            _post_discord(c_plus_embed, webhook_url=webhook_url, content=None)
+        return sig_obj
+
     _post_discord(embed, webhook_url=webhook_url, content=content_str)
     return sig_obj
 

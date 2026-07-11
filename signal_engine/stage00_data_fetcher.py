@@ -197,6 +197,13 @@ def get_volume_p40(symbol: str) -> Optional[float]:
         return None
     return float(np.percentile(vols, 40))
 
+def get_volume_p20(symbol: str) -> Optional[float]:
+    """20th percentile of the symbol's 30-day daily volume. None if cache empty."""
+    vols = _daily_vol_cache.get(symbol)
+    if vols is None or len(vols) == 0:
+        return None
+    return float(np.percentile(vols, 20))
+
 
 # ── Bybit futures ──────────────────────────────────────────────────────────
 

@@ -12,6 +12,7 @@ import time
 import traceback
 from typing import Dict, Any, Optional
 
+import requests
 import schedule
 from joblib import Parallel, delayed
 
@@ -37,6 +38,139 @@ from signal_engine.utils.logger import get_logger
 
 logger = get_logger("ENGINE", "SYSTEM")
 cycle_count = 0
+
+
+def _send_diagnostic_embed(results: list):
+    webhook = os.getenv("DISCORD_WEBHOOK_SYSTEM")
+    if not webhook:
+        print("[FAIL] DISCORD_WEBHOOK_SYSTEM missing for diagnostic mode.")
+        return
+
+    fields = []
+    for r in results:
+        sym = r.get("symbol", "UNKNOWN")
+        dir_str = r.get("direction", "NONE")
+        rej = r.get("diagnostic_reject", "NONE")
+        
+        # Format the values
+        liq = r.get('stage01')
+        if liq:
+            vol_status = "PASS" if liq.volume_pass else "FAIL"
+            vol = liq.current_volume_usd or 0
+            p40 = liq.p40_threshold_usd or 0
+            liq_str = f"{vol_status} (${vol/1e6:.1f}M vs ${p40/1e6:.1f}M P40)"
+        else:
+            liq_str = "N/A"
+            
+        reg = r.get('stage03')
+        reg_str = f"{reg['regime_1h'].regime} (1h) / {reg['regime_4h'].regime} (4h)" if reg else "N/A"
+        
+        btc = r.get('stage04')
+        btc_str = btc.classification if btc else "N/A"
+        
+        rs = r.get('stage05')
+        rs_str = f"{rs.classification} ({rs.combined_rs:+.1f}%)" if rs else "N/A"
+        
+        tq = r.get('stage06')
+        tq_str = tq.trend_quality if tq else "N/A"
+        
+        volm = r.get('stage07')
+        vol_z = f"{volm.volume_z_score:.2f}" if volm else "N/A"
+        
+        fut = r.get('stage09')
+        if fut:
+            fut_str = f"OI: {fut.oi_signal or 'NEUTRAL'} | Fund: {fut.funding_signal or 'NEUTRAL'}"
+        else:
+            fut_str = "N/A"
+            
+        sr = r.get('stage10')
+        sr_str = "FAIL" if (sr and sr.sr_reject) else ("PASS" if sr else "N/A")
+        
+        ent = r.get('stage11')
+        ent_str = "YES" if (ent and ent.is_confirmed) else "NO"
+        
+        conf = r.get('stage12')
+        if conf:
+            score_str = f"{conf.raw_weighted_score} -> {conf.final_score} ({conf.grade})"
+        else:
+            score_str = "N/A"
+
+        val = (
+            f"```yaml\n"
+            f"Vol    : {liq_str}\n"
+            f"Regime : {reg_str}\n"
+            f"BTC    : {btc_str}\n"
+            f"RS     : {rs_str}\n"
+            f"Trend  : {tq_str}\n"
+            f"Vol Z  : {vol_z}\n"
+            f"Futures: {fut_str}\n"
+            f"S/R    : {sr_str}\n"
+            f"Entry  : {ent_str}\n"
+            f"Score  : {score_str}\n"
+            f"Reject : {rej}\n"
+            f"```"
+        )
+        fields.append({
+            "name": f"**{sym} · {dir_str}**",
+            "value": val,
+            "inline": False
+        })
+
+    payload = {
+        "embeds": [{
+            "title": "🔍 DIAGNOSTIC RUN RESULTS",
+            "color": 0x3498db,
+            "fields": fields,
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+        }]
+    }
+
+    try:
+        resp = requests.post(webhook, json=payload)
+        resp.raise_for_status()
+        print("[OK] Diagnostic embed sent.")
+    except Exception as e:
+        print(f"[FAIL] Error sending diagnostic embed: {e}")
+
+
+def _send_market_squeeze_alert(count: int):
+    import json, os, datetime
+    state_file = cfg.state_file
+    state = {}
+    if os.path.exists(state_file):
+        with open(state_file, 'r') as f:
+            state = json.load(f)
+            
+    last_alert = state.get('last_squeeze_alert')
+    now = datetime.datetime.now(datetime.timezone.utc)
+    if last_alert:
+        last_dt = datetime.datetime.fromisoformat(last_alert)
+        if (now - last_dt).total_seconds() < 86400:
+            return # Sent in last 24h
+            
+    webhook = os.getenv("DISCORD_WEBHOOK_SYSTEM")
+    if not webhook:
+        return
+        
+    last_sent_str = last_alert or "Never"
+    
+    payload = {
+        "content": f"🌀 **MARKET SQUEEZE DETECTED**\n"
+                   f"{count}/7 coins in LOW_VOL_SQUEEZE\n"
+                   f"No signals expected until breakout.\n"
+                   f"Watch BTC: Break above resistance = bullish signals incoming\n"
+                   f"           Break below support = short signals incoming\n"
+                   f"Last sent: {last_sent_str}"
+    }
+    try:
+        import requests
+        requests.post(webhook, json=payload, timeout=5)
+        state['last_squeeze_alert'] = now.isoformat()
+        with open(state_file, 'w') as f:
+            json.dump(state, f)
+        logger.info(f"Market Squeeze Alert sent for {count} coins.")
+    except Exception as e:
+        logger.error(f"Failed to send market squeeze alert: {e}")
 
 
 def _print_dry_run_summary(sym: str, res: Dict[str, Any]):
@@ -140,7 +274,7 @@ def _print_dry_run_summary(sym: str, res: Dict[str, Any]):
 def _run_direction(
     sym: str, direction: str, price: float, atr_val: float,
     df_15m, df_4h, reg_dict, btc_macro, rs, tq, volm,
-    time_filter
+    time_filter, liquidity_tier: str
 ) -> dict:
     res = {}
     
@@ -161,7 +295,7 @@ def _run_direction(
     ent = analyze_entry_confirmation(df_15m, sym, direction, reg_dict["regime_1h"].regime, sr.resistance_levels, sr.support_levels)
     res['stage11'] = ent
     
-    conf = analyze_confidence(sym, direction, time_filter, reg_dict, btc_macro, rs, tq, volm, vty, fut.to_futures_data(), sr.to_sr_levels(), ent.to_entry_signal("CLOSED"))
+    conf = analyze_confidence(sym, direction, time_filter, reg_dict, btc_macro, rs, tq, volm, vty, fut.to_futures_data(), sr.to_sr_levels(), ent.to_entry_signal("CLOSED"), liquidity_tier)
     res['stage12'] = conf
     
     return res
@@ -181,15 +315,21 @@ def analyze_symbol(sym: str, btc_1h, btc_4h, btc_macro, mode: str) -> dict:
         liq = check_liquidity(sym)
         res['stage01'] = liq
         if not liq.overall_pass:
-            res['decision'] = f"REJECTED_LIQUIDITY ({liq.reject_reason})"
-            return res
+            if mode != "diagnostic":
+                res['decision'] = f"REJECTED_LIQUIDITY ({liq.reject_reason})"
+                return res
+            elif 'diagnostic_reject' not in res:
+                res['diagnostic_reject'] = f"LIQUIDITY ({liq.reject_reason})"
             
         # Stage 02
         tf = check_time_filter(df_1h)
         res['stage02'] = tf
         if tf.status == "BLOCKED" and not tf.override_applied:
-            res['decision'] = "REJECTED_TIME"
-            return res
+            if mode != "diagnostic":
+                res['decision'] = "REJECTED_TIME"
+                return res
+            elif 'diagnostic_reject' not in res:
+                res['diagnostic_reject'] = "TIME_FILTER"
             
         # Stage 03
         reg = analyze_regime(df_1h, df_4h, sym)
@@ -215,8 +355,8 @@ def analyze_symbol(sym: str, btc_1h, btc_4h, btc_macro, mode: str) -> dict:
         atr_val = float(atr(df_4h, 14).iloc[-1])
         
         # Evaluate both LONG and SHORT
-        long_res = _run_direction(sym, "LONG", price, atr_val, df_15m, df_4h, reg, btc_macro, rs, tq, volm, tf)
-        short_res = _run_direction(sym, "SHORT", price, atr_val, df_15m, df_4h, reg, btc_macro, rs, tq, volm, tf)
+        long_res = _run_direction(sym, "LONG", price, atr_val, df_15m, df_4h, reg, btc_macro, rs, tq, volm, tf, liq.liquidity_tier)
+        short_res = _run_direction(sym, "SHORT", price, atr_val, df_15m, df_4h, reg, btc_macro, rs, tq, volm, tf, liq.liquidity_tier)
         
         long_score = long_res['stage12'].final_score
         short_score = short_res['stage12'].final_score
@@ -229,8 +369,11 @@ def analyze_symbol(sym: str, btc_1h, btc_4h, btc_macro, mode: str) -> dict:
         
         conf = res['stage12']
         if conf.grade == "REJECT":
-            res['decision'] = "REJECTED_CONFIDENCE"
-            return res
+            if mode != "diagnostic":
+                res['decision'] = "REJECTED_CONFIDENCE"
+                return res
+            elif 'diagnostic_reject' not in res:
+                res['diagnostic_reject'] = "CONFIDENCE_SCORE"
             
         # Stage 14
         cluster, _, stale_matrix = get_correlation_cluster(sym)
@@ -238,13 +381,16 @@ def analyze_symbol(sym: str, btc_1h, btc_4h, btc_macro, mode: str) -> dict:
         res['stage14'] = port
         
         if not port.approved:
-            res['decision'] = f"REJECTED_PORTFOLIO ({port.reject_reason})"
-            return res
+            if mode != "diagnostic":
+                res['decision'] = f"REJECTED_PORTFOLIO ({port.reject_reason})"
+                return res
+            elif 'diagnostic_reject' not in res:
+                res['diagnostic_reject'] = f"PORTFOLIO ({port.reject_reason})"
             
         res['decision'] = "SIGNAL_APPROVED"
         
-        # Stage 13 (Send if not dry-run)
-        if mode != "dry-run":
+        # Stage 13 (Send if not dry-run or diagnostic)
+        if mode not in ("dry-run", "diagnostic"):
             vty = res['stage08']
             fut = res['stage09']
             sr = res['stage10']
@@ -265,11 +411,12 @@ def analyze_symbol(sym: str, btc_1h, btc_4h, btc_macro, mode: str) -> dict:
                 confidence=conf, entry_price=price, stop_loss=stop_loss, target1=target1, target2=target2,
                 rr_ratio=rr_ratio, position_size_pct=vty.position_size_pct, invalidation_price=stop_loss,
                 trend_tag=tq.overextension_tag, vol_tag=volm.volume_classification, vol_env=vty.high_vol_environment,
-                matrix_stale=stale_matrix, volume_z=volm.volume_z_score, ema_price=price
+                matrix_stale=stale_matrix, volume_z=volm.volume_z_score, ema_price=price,
+                liquidity_tier=liq.liquidity_tier, trend_result=tq, vol_result=volm, regime_4h=reg["regime_4h"]
             )
             
             if mode in ("paper", "live"):
-                if conf.final_score >= 72:
+                if conf.final_score >= 72 and liq.liquidity_tier == "P40":
                     if volm.volume_z_score >= 0.5:
                         open_paper_position(
                             symbol=sym,
@@ -316,6 +463,9 @@ def run_cycle(symbols: list, mode: str):
     
     signals_fired = sum(1 for r in results if r.get('decision') == "SIGNAL_APPROVED")
     
+    if mode == "diagnostic":
+        _send_diagnostic_embed(results)
+        
     if mode == "dry-run":
         for r in results:
             _print_dry_run_summary(r['symbol'], r)
@@ -325,13 +475,23 @@ def run_cycle(symbols: list, mode: str):
         check_paper_positions(current_prices)
         run_daily_summary_check()
             
+    # --- Market Squeeze Check ---
+    squeezed_count = 0
+    for r in results:
+        reg = r.get('stage03')
+        if reg and reg['regime_1h'].regime == "LOW_VOL_SQUEEZE" and reg['regime_4h'].regime == "LOW_VOL_SQUEEZE":
+            squeezed_count += 1
+            
+    if squeezed_count >= 4 and mode != "dry-run":
+        _send_market_squeeze_alert(squeezed_count)
+            
     duration = time.time() - start_time
     logger.info(f"=== Cycle {cycle_count} Complete | Duration: {duration:.1f}s | Signals: {signals_fired} ===")
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["dry-run", "paper", "live", "backtest"], default="dry-run")
+    parser.add_argument("--mode", choices=["dry-run", "paper", "live", "backtest", "diagnostic"], default="dry-run")
     parser.add_argument("--symbol", type=str, help="Run single symbol")
     parser.add_argument("--years", type=int, default=3, help="Years of data for backtest")
     parser.add_argument("--force-live", action="store_true", help="Override live gate")
@@ -388,6 +548,9 @@ def main():
         
     # Initial run
     run_cycle(symbols, args.mode)
+    
+    if args.mode == "diagnostic":
+        sys.exit(0)
     
     # Schedule
     schedule.every(15).minutes.do(run_cycle, symbols=symbols, mode=args.mode)

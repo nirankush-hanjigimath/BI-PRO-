@@ -86,6 +86,9 @@ class EntrySignal:
     candle_status:      str             # CLOSED|FORMING
     is_valid:           bool
     rejection_reason:   Optional[str] = None
+    is_doji:            bool = False
+    is_spinning_top:    bool = False
+    body_quality:       str = "NORMAL"
 
 
 @dataclass
