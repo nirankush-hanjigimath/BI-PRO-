@@ -128,17 +128,20 @@ def open_paper_position(
     _save_state(state)
     logger.info(f"[PAPER] Opened {direction} on {symbol} at {filled_price:.4f} (Slippage applied)")
 
-    from signal_engine.utils.alerts import alert_paper_fill
-    alert_paper_fill(
-        symbol=symbol,
-        direction=direction,
-        fill_price=filled_price,
-        stop=stop_loss,
-        target1=target1,
-        target2=target2,
-        position_size_pct=size_pct,
-        slippage_pct=0.05
-    )
+    try:
+        from signal_engine.utils.alerts import alert_paper_fill
+        alert_paper_fill(
+            symbol=symbol,
+            direction=direction,
+            fill_price=filled_price,
+            stop=stop_loss,
+            target1=target1,
+            target2=target2,
+            position_size_pct=size_pct,
+            slippage_pct=0.05
+        )
+    except Exception as e:
+        logger.error(f"[PAPER] Failed to send fill alert for {symbol}: {e}")
 
 
 def _close_position(state: dict, pos: dict, exit_price: float, reason: str, partial: bool = False):
@@ -211,6 +214,21 @@ def _close_position(state: dict, pos: dict, exit_price: float, reason: str, part
         state["closed_trades"].append(trade_record)
         
     logger.info(f"[PAPER] {pos['symbol']} Closed ({reason}) | PnL: ${realized_pnl_usd:+.2f} ({pct_impact:+.2f}%)")
+
+    # ── Discord exit notification ─────────────────────────────────────────
+    try:
+        from signal_engine.utils.alerts import alert_paper_exit
+        alert_paper_exit(
+            symbol=pos['symbol'],
+            direction=pos['direction'],
+            exit_price=exit_price,
+            exit_reason=reason,
+            pnl_usd=realized_pnl_usd,
+            pnl_r=r_multiple,
+            new_balance=state['balance'],
+        )
+    except Exception as e:
+        logger.error(f"[PAPER] Failed to send exit alert for {pos['symbol']}: {e}")
 
 
 def check_paper_positions(current_prices: Dict[str, float]) -> None:

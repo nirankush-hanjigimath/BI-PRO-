@@ -420,7 +420,7 @@ if __name__ == "__main__":
         if df_15m is None or df_1h is None or df_4h is None:
             continue
             
-        tf = check_time_filter(df_1h)
+        tf = check_time_filter(0.0)  # standalone test: no live volume Z-score available
         reg = analyze_regime(df_1h, df_4h, sym)
         btc_m = analyze_btc_macro(fetch_ohlcv("BTCUSDT", "1h"), fetch_ohlcv("BTCUSDT", "4h"))
         rs = analyze_relative_strength(df_1h, df_4h, fetch_ohlcv("BTCUSDT", "1h"), fetch_ohlcv("BTCUSDT", "4h"), sym)

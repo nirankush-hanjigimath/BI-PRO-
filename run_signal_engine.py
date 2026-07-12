@@ -216,9 +216,21 @@ def send_2hr_status_update(force=False):
     else:
         closest_str = f"{status_tracker['closest_signal_symbol']} scored {status_tracker['closest_signal_score']:.1f}/100 — rejected: {status_tracker['closest_signal_reject']}"
         
-    status_msg = "ACTIVE — signals flowing normally"
+    total_signals_2hr = (
+        status_tracker['signals_a_plus'] + status_tracker['signals_a'] +
+        status_tracker['signals_b'] + status_tracker['signals_c_plus']
+    )
     if status_tracker.get('is_squeezing', False):
-        status_msg = f"SQUEEZE MODE — waiting for BTC to break ${status_tracker.get('btc_resistance', 0):,.2f} or ${status_tracker.get('btc_support', 0):,.2f}"
+        status_msg = f"🌀 SQUEEZE MODE — waiting for BTC to break ${status_tracker.get('btc_resistance', 0):,.2f} or ${status_tracker.get('btc_support', 0):,.2f}"
+    elif total_signals_2hr > 0:
+        status_msg = "✅ ACTIVE — signals flowing normally"
+    else:
+        status_msg = "👀 SCANNING — no clean setups found this period"
+
+    # Clear stale squeeze price levels when market exits squeeze
+    if not status_tracker.get('is_squeezing', False):
+        status_tracker['btc_resistance'] = 0.0
+        status_tracker['btc_support'] = 0.0
 
     embed = {
         "title": "📊 2-Hour Status Update",
@@ -451,12 +463,8 @@ def analyze_symbol(sym: str, btc_1h, btc_4h, btc_macro, mode: str) -> dict:
         df_4h = fetch_ohlcv(sym, "4h")
         if df_15m is None or df_1h is None or df_4h is None:
             return res
-            
-        # Stage 03
-        reg = analyze_regime(df_1h, df_4h, sym)
-        res['stage03'] = reg
-        
-        # Stage 01
+
+        # Stage 01 — Liquidity gate
         liq = check_liquidity(sym)
         res['stage01'] = liq
         if not liq.overall_pass:
@@ -465,11 +473,16 @@ def analyze_symbol(sym: str, btc_1h, btc_4h, btc_macro, mode: str) -> dict:
                 return res
             elif 'diagnostic_reject' not in res:
                 res['diagnostic_reject'] = f"LIQUIDITY ({liq.reject_reason})"
-            
-        status_tracker['coins_passing_liquidity'] += 1
-            
-        # Stage 02
-        tf = check_time_filter(df_1h)
+
+        # Track per-cycle liquidity pass (returned to run_cycle via res dict)
+        res['_passed_liquidity'] = True
+
+        # Stage 07 — Volume (moved up so Z-score is available for time filter override)
+        volm = analyze_volume(df_15m, "15m", sym)
+        res['stage07'] = volm
+
+        # Stage 02 — Time filter (receives correct volume Z-score float)
+        tf = check_time_filter(volm.volume_z_score)
         res['stage02'] = tf
         if tf.status == "BLOCKED" and not tf.override_applied:
             if mode != "diagnostic":
@@ -477,21 +490,21 @@ def analyze_symbol(sym: str, btc_1h, btc_4h, btc_macro, mode: str) -> dict:
                 return res
             elif 'diagnostic_reject' not in res:
                 res['diagnostic_reject'] = "TIME_FILTER"
-        
-        # Stage 04 - passed in
+
+        # Stage 03 — Regime detection
+        reg = analyze_regime(df_1h, df_4h, sym)
+        res['stage03'] = reg
+
+        # Stage 04 — BTC macro (passed in from run_cycle)
         res['stage04'] = btc_macro
-        
-        # Stage 05
+
+        # Stage 05 — Relative strength
         rs = analyze_relative_strength(df_1h, df_4h, btc_1h, btc_4h, sym)
         res['stage05'] = rs
-        
-        # Stage 06
+
+        # Stage 06 — Trend quality
         tq = analyze_trend_quality(df_4h, df_1h, sym)
         res['stage06'] = tq
-        
-        # Stage 07
-        volm = analyze_volume(df_15m, "15m", sym)
-        res['stage07'] = volm
         
         price = float(df_4h["close"].iloc[-1])
         res['current_price'] = price
@@ -626,6 +639,10 @@ def run_cycle(symbols: list, mode: str):
     results = Parallel(n_jobs=2, prefer="threads")(
         delayed(analyze_symbol)(sym, btc_1h, btc_4h, btc_macro, mode) for sym in symbols
     )
+
+    # Fix 4: Count coins passing liquidity from THIS cycle only (never accumulates)
+    coins_passed_this_cycle = sum(1 for r in results if r.get('_passed_liquidity', False))
+    status_tracker['coins_passing_liquidity'] = coins_passed_this_cycle
     
     signals_fired = sum(1 for r in results if r.get('decision') == "SIGNAL_APPROVED")
     
@@ -738,7 +755,7 @@ def main():
     run_cycle(symbols, args.mode)
     
     if args.mode not in ("dry-run", "diagnostic"):
-        send_2hr_status_update(force=True)
+        send_2hr_status_update(force=False)  # Respect night mode even on startup
     
     if args.mode == "diagnostic":
         sys.exit(0)

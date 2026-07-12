@@ -7,7 +7,7 @@ Generates narrative, identifies risks, and formats Discord embeds.
 import os
 import requests
 import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from dotenv import load_dotenv
 from signal_engine.models import (
@@ -20,6 +20,10 @@ from signal_engine.utils.narrative import select_template
 load_dotenv()
 
 last_signal_time = {}
+
+# ── Rate-limit state (in-memory, resets on restart) ───────────────────────
+_last_api_warning_time: dict = {}   # endpoint str -> datetime
+_last_matrix_stale_time: Optional[datetime.datetime] = None
 
 COLOR_LONG = 0x00ff88
 COLOR_SHORT = 0xff4444
@@ -324,6 +328,15 @@ def send_loss_limit_alert(daily_or_weekly: str, drawdown_pct: float, account_bal
     get_logger("STAGE13", "SYSTEM").error(f"Loss limit alert sent: {daily_or_weekly}")
 
 def send_api_warning(endpoint: str, error_message: str):
+    global _last_api_warning_time
+    now = datetime.datetime.utcnow()
+    last = _last_api_warning_time.get(endpoint)
+    if last and (now - last).total_seconds() < 3600:  # 1-hour cooldown per endpoint
+        get_logger("STAGE13", "SYSTEM").debug(
+            f"API warning for '{endpoint}' suppressed (last sent {(now - last).total_seconds():.0f}s ago)"
+        )
+        return
+    _last_api_warning_time[endpoint] = now
     embed = {
         "title": f"⚠️ API WARNING: {endpoint}",
         "color": COLOR_WARN,
@@ -333,6 +346,14 @@ def send_api_warning(endpoint: str, error_message: str):
     get_logger("STAGE13", "SYSTEM").warning(f"API Warning sent: {endpoint}")
 
 def send_matrix_stale_alert(hours_since_refresh: float):
+    global _last_matrix_stale_time
+    now = datetime.datetime.utcnow()
+    if _last_matrix_stale_time and (now - _last_matrix_stale_time).total_seconds() < 3600:  # 1-hour cooldown
+        get_logger("STAGE13", "SYSTEM").debug(
+            f"Matrix stale alert suppressed (last sent {(now - _last_matrix_stale_time).total_seconds():.0f}s ago)"
+        )
+        return
+    _last_matrix_stale_time = now
     embed = {
         "title": f"⚠️ CORRELATION MATRIX STALE",
         "color": COLOR_WARN,

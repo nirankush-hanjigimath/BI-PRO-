@@ -294,6 +294,43 @@ def alert_paper_fill(
     )
 
 
+def alert_paper_exit(
+    symbol: str,
+    direction: str,
+    exit_price: float,
+    exit_reason: str,       # STOP_LOSS | TARGET_1 | TARGET_2
+    pnl_usd: float,
+    pnl_r: float,
+    new_balance: float,
+) -> bool:
+    """Coloured embed — paper trade closed (WIN green / LOSS red)."""
+    is_win = pnl_usd >= 0
+    color = EMBED_COLORS["SIGNAL"] if is_win else EMBED_COLORS["CRITICAL"]
+    result_label = "WIN ✅" if is_win else "LOSS ❌"
+    emoji = "🟢" if direction == "LONG" else "🔴"
+    reason_emoji = {
+        "STOP_LOSS":  "🛑 Stop Loss",
+        "TARGET_1":   "🎯 Target 1 (partial)",
+        "TARGET_2":   "🏆 Target 2 (full close)",
+    }.get(exit_reason, exit_reason)
+
+    fields = [
+        {"name": "Direction",    "value": f"{emoji} {direction}",          "inline": True},
+        {"name": "Result",       "value": result_label,                     "inline": True},
+        {"name": "Exit Reason",  "value": reason_emoji,                     "inline": True},
+        {"name": "Exit Price",   "value": f"`${exit_price:,.4f}`",          "inline": True},
+        {"name": "PnL",          "value": f"`${pnl_usd:+,.2f}` ({pnl_r:+.2f}R)", "inline": True},
+        {"name": "New Balance",  "value": f"`${new_balance:,.2f}`",         "inline": True},
+    ]
+    return _post_embed(
+        "SIGNAL" if is_win else "CRITICAL",
+        f"📤 Paper Exit — {symbol}",
+        f"{result_label} · {direction} closed at `{_utc_now()}`",
+        fields=fields,
+        symbol=symbol,
+    )
+
+
 def alert_daily_paper_summary(
     date_str: str,
     signals_fired: int,
